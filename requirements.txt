@@ -1,0 +1,14 @@
+albumentations>=1.4
+opencv-python-headless
+scikit-image
+scikit-learn
+scipy
+networkx
+sknw
+numpy
+pandas
+pyyaml
+tqdm
+matplotlib
+tensorboard
+Pillow

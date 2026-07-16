@@ -1,0 +1,15 @@
+[submodule "external/rrwnet"]
+	path = external/rrwnet
+	url = https://github.com/j-morano/rrwnet
+[submodule "external/cmrrwnet"]
+	path = external/cmrrwnet
+	url = https://github.com/Peng2004/CMRRWNet
+[submodule "external/mnet_deepcdr"]
+	path = external/mnet_deepcdr
+	url = https://github.com/HzFu/MNet_DeepCDR
+[submodule "external/minima"]
+	path = external/minima
+	url = https://github.com/LSXI7/MINIMA
+[submodule "external/ripav"]
+	path = external/ripav
+	url = https://github.com/weidai00/RIP-AV
