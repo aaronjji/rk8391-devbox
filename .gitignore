@@ -21,3 +21,7 @@ runs/
 wandb/
 outputs/
 *.log
+
+# Generated predictions / submission packages
+predictions/
+submissions/

@@ -47,8 +47,14 @@ class GaveAVDataset(Dataset):
         train: bool = True,
         max_crop_attempts: int = 10,
         seed: int = 0,
+        ffa_root: str | None = None,
     ):
+        """ffa_root: directory containing registered FFA_A/FFA_AV images
+        (see src/registration/minima_wrapper.py -- CFP/FFA pairs are not
+        pre-registered, verified empirically). Defaults to `data_root` if
+        not given, i.e. assumes FFA is already registered there."""
         self.root = Path(data_root) / split
+        self.ffa_root = Path(ffa_root) / split if ffa_root else self.root
         self.case_ids = case_ids
         self.patch_size = patch_size
         self.use_ffa = use_ffa
@@ -96,8 +102,8 @@ class GaveAVDataset(Dataset):
 
         kwargs = {"image": image, "label": label_full, "roi": roi}
         if self.use_ffa:
-            kwargs["ffa_a"] = _read_gray(self.root / "FFA_A" / f"{name}.png")[..., None].repeat(3, axis=2)
-            kwargs["ffa_av"] = _read_gray(self.root / "FFA_AV" / f"{name}.png")[..., None].repeat(3, axis=2)
+            kwargs["ffa_a"] = _read_gray(self.ffa_root / "FFA_A" / f"{name}.png")[..., None].repeat(3, axis=2)
+            kwargs["ffa_av"] = _read_gray(self.ffa_root / "FFA_AV" / f"{name}.png")[..., None].repeat(3, axis=2)
 
         for attempt in range(self.max_crop_attempts):
             out = self.transform(**kwargs)
