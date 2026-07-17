@@ -21,7 +21,8 @@ from torch.utils.data import DataLoader
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from datasets.gave_dataset import GaveAVDataset  # noqa: E402
 from datasets.splits import kfold_case_ids  # noqa: E402
-from losses.rrloss import BCE3Loss, RRLoss  # noqa: E402
+from losses.rrloss import BCE3Loss, RRLoss, RRClDiceLoss  # noqa: E402
+from losses.cldice import ArteryVeinClDiceLoss  # noqa: E402
 from models.rrwnet import build_model, transfer_task1_to_task2  # noqa: E402
 
 
@@ -41,6 +42,8 @@ def parse_args():
     p.add_argument("--num-workers", type=int, default=2)
     p.add_argument("--amp-dtype", type=str, default="bf16", choices=["none", "fp16", "bf16"])
     p.add_argument("--warm-start-task1", type=str, default=None, help="Path to a trained Task1 checkpoint (latest.pth or final.pth) to initialize the RGB encoder + decoder from")
+    p.add_argument("--pos-weight", type=float, default=5.0, help="See train_task1.py -- upweights vessel-positive pixels, 0 disables")
+    p.add_argument("--cldice-weight", type=float, default=0.3, help="See train_task1.py -- soft-clDice topology loss weight, 0 disables")
     p.add_argument("--out-dir", type=str, default="runs/task2")
     p.add_argument("--max-steps", type=int, default=None)
     p.add_argument("--max-seconds", type=float, default=None)
@@ -77,7 +80,12 @@ def main():
         task1_sd = ckpt["model"] if isinstance(ckpt, dict) and "model" in ckpt else ckpt
         model = transfer_task1_to_task2(model, task1_sd)
 
-    criterion = RRLoss(BCE3Loss())
+    base_criterion = BCE3Loss(pos_weight=args.pos_weight if args.pos_weight > 0 else None)
+    if args.cldice_weight > 0:
+        criterion = RRClDiceLoss(base_criterion, ArteryVeinClDiceLoss(), cldice_weight=args.cldice_weight)
+    else:
+        criterion = RRLoss(base_criterion)
+    criterion = criterion.to(device)  # pos_weight is a buffer, must move with the module
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
     amp_enabled = args.amp_dtype != "none" and device.type == "cuda"
