@@ -104,6 +104,12 @@ def main():
     p.add_argument("--tile", type=int, default=384, help="Match training patch size (384 verified stable on the T550)")
     p.add_argument("--stride", type=int, default=288)
     p.add_argument("--amp-dtype", type=str, default="bf16", choices=["none", "fp16", "bf16"])
+    p.add_argument(
+        "--quantize-levels", type=int, default=32,
+        help="Quantize output PNGs to this many distinct levels to keep submission zips under AI Studio's "
+             "100MB limit (32 gave ~55%% smaller files with negligible precision loss in testing, since "
+             "every disclosed Task1/Task2 metric is threshold-based). 0 disables (full 8-bit precision).",
+    )
     args = p.parse_args()
 
     if args.task == "task2" and not args.ffa_dir:
@@ -140,7 +146,17 @@ def main():
             probs[roi == 0] = 0.0
 
         out_img = (probs * 255).astype(np.uint8)
-        Image.fromarray(out_img, mode="RGB").save(out_dir / img_path.name)
+        if args.quantize_levels > 0:
+            # Quantize to fewer distinct levels -- dramatically improves PNG
+            # compression (32 levels: ~55% smaller in testing) with minimal
+            # precision loss. Worth doing since Task1+Task2 combined submissions
+            # exceeded AI Studio's 100MB upload limit (137MB observed for 100
+            # full-res probability maps) -- and every disclosed Task1/Task2
+            # metric (DSC/Sen/Spec/Acc/COR/INF) is threshold-based anyway, so
+            # coarser-than-8-bit precision costs effectively nothing.
+            n = args.quantize_levels - 1
+            out_img = (np.round(out_img.astype(np.float32) / 255 * n) / n * 255).astype(np.uint8)
+        Image.fromarray(out_img, mode="RGB").save(out_dir / img_path.name, compress_level=9)
         print(f"  {img_path.name}")
 
 
