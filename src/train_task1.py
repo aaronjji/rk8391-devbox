@@ -24,7 +24,11 @@ def parse_args():
     p.add_argument("--data-root", type=str, default="data/raw/GAVE2_preliminary")
     p.add_argument("--fold", type=int, default=0)
     p.add_argument("--n-folds", type=int, default=5)
-    p.add_argument("--patch-size", type=int, default=512)
+    p.add_argument(
+        "--patch-size", type=int, default=384,
+        help="384 verified stable+fast on the T550 (bf16, 3.09GB peak, ~9s/step); "
+             "448+ triggers a severe slowdown from Windows shared-GPU-memory fallback near the 4GB ceiling",
+    )
     p.add_argument("--base-ch", type=int, default=64)
     p.add_argument("--iterations", type=int, default=5)
     p.add_argument("--epochs", type=int, default=60)
@@ -32,7 +36,10 @@ def parse_args():
     p.add_argument("--batch-size", type=int, default=1)
     p.add_argument("--lr", type=float, default=1e-4)
     p.add_argument("--num-workers", type=int, default=2)
-    p.add_argument("--amp", action="store_true", default=True)
+    p.add_argument(
+        "--amp-dtype", type=str, default="bf16", choices=["none", "fp16", "bf16"],
+        help="fp16 autocast produced NaN forward passes on the T550 (verified empirically) -- bf16 avoids the overflow (same exponent range as fp32) at a similar memory cost; 'none' disables mixed precision entirely",
+    )
     p.add_argument("--no-pretrained", dest="pretrained", action="store_false", default=True)
     p.add_argument("--out-dir", type=str, default="runs/task1")
     p.add_argument("--max-steps", type=int, default=None, help="Smoke-test override: stop after N total steps")
@@ -67,7 +74,12 @@ def main():
 
     criterion = RRLoss(BCE3Loss())
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-    scaler = torch.amp.GradScaler("cuda", enabled=args.amp and device.type == "cuda")
+
+    amp_enabled = args.amp_dtype != "none" and device.type == "cuda"
+    amp_torch_dtype = {"fp16": torch.float16, "bf16": torch.bfloat16, "none": None}[args.amp_dtype]
+    # GradScaler is only needed (and only valid) for fp16 -- bf16's exponent
+    # range matches fp32 so it doesn't need loss scaling.
+    scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled and args.amp_dtype == "fp16")
 
     out_dir = Path(args.out_dir) / f"fold{args.fold}"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -129,13 +141,24 @@ def main():
             roi = batch["roi"].to(device, non_blocking=True)
 
             optimizer.zero_grad(set_to_none=True)
-            with torch.amp.autocast("cuda", enabled=args.amp and device.type == "cuda"):
+            with torch.amp.autocast("cuda", dtype=amp_torch_dtype, enabled=amp_enabled):
                 predictions = model(image)
                 loss = criterion(predictions, label, roi)
 
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
+            if scaler.is_enabled():
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                loss.backward()
+                optimizer.step()
+
+            if torch.isnan(loss):
+                raise RuntimeError(
+                    f"NaN loss at step {global_step} (epoch {epoch+1}) -- amp_dtype={args.amp_dtype}. "
+                    "If this is fp16, switch to --amp-dtype bf16 or none; the model's forward pass is "
+                    "numerically unstable under fp16 autocast on some GPUs (verified on this project's T550)."
+                )
 
             epoch_loss += loss.item()
             n_batches += 1

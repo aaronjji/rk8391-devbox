@@ -27,9 +27,9 @@ def sliding_window_predict(
     model: torch.nn.Module,
     image: np.ndarray,
     device: torch.device,
-    tile: int = 512,
-    stride: int = 384,
-    amp: bool = True,
+    tile: int = 384,
+    stride: int = 288,
+    amp_dtype: str = "bf16",
 ) -> np.ndarray:
     """image: HxWx3 uint8. Returns HxWx3 float32 sigmoid probabilities
     (artery, vessel, vein), tiled with overlap-averaging."""
@@ -58,7 +58,8 @@ def sliding_window_predict(
                     patch = padded
 
                 tensor = torch.from_numpy(patch.astype(np.float32) / 255.0).permute(2, 0, 1).unsqueeze(0).to(device)
-                with torch.amp.autocast("cuda", enabled=amp and device.type == "cuda"):
+                amp_torch_dtype = {"fp16": torch.float16, "bf16": torch.bfloat16, "none": None}[amp_dtype]
+                with torch.amp.autocast("cuda", dtype=amp_torch_dtype, enabled=amp_dtype != "none" and device.type == "cuda"):
                     predictions = model(tensor)
                 probs = torch.sigmoid(predictions[-1][:, :3]).float().cpu().numpy()[0]  # 3xHxW
                 probs = np.transpose(probs, (1, 2, 0))[:ph, :pw]  # HxWx3
@@ -78,8 +79,9 @@ def main():
     p.add_argument("--out-dir", type=str, required=True)
     p.add_argument("--base-ch", type=int, default=64)
     p.add_argument("--iterations", type=int, default=5)
-    p.add_argument("--tile", type=int, default=512)
-    p.add_argument("--stride", type=int, default=384)
+    p.add_argument("--tile", type=int, default=384, help="Match training patch size (384 verified stable on the T550)")
+    p.add_argument("--stride", type=int, default=288)
+    p.add_argument("--amp-dtype", type=str, default="bf16", choices=["none", "fp16", "bf16"])
     args = p.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -98,7 +100,7 @@ def main():
     print(f"Running inference on {len(image_paths)} images -> {out_dir}")
     for img_path in image_paths:
         image = np.array(Image.open(img_path).convert("RGB"))
-        probs = sliding_window_predict(model, image, device, tile=args.tile, stride=args.stride)
+        probs = sliding_window_predict(model, image, device, tile=args.tile, stride=args.stride, amp_dtype=args.amp_dtype)
 
         if masks_dir is not None:
             roi = np.array(Image.open(masks_dir / img_path.name).convert("L"))
