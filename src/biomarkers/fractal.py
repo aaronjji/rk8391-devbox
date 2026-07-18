@@ -17,20 +17,23 @@ def calculate_fractal_dimension_skeleton(binary_img: np.ndarray) -> float:
         return 0.0
 
     _, binary = cv2.threshold(binary_img, 127, 1, cv2.THRESH_BINARY)
-    skeleton = skeletonize(binary).astype(np.uint8)
+    skeleton = skeletonize(binary).astype(bool)
 
     rows, cols = skeleton.shape
     max_box_size = min(rows, cols) // 2
 
     box_sizes, box_counts = [], []
     for box_size in range(1, max_box_size + 1):
-        count = 0
-        for i in range(0, rows, box_size):
-            for j in range(0, cols, box_size):
-                i_end = min(i + box_size, rows)
-                j_end = min(j + box_size, cols)
-                if np.sum(skeleton[i:i_end, j:j_end]) > 0:
-                    count += 1
+        # Vectorized box-counting: pad with False (never flips occupancy of
+        # real pixels) so every block reshapes evenly, then reduce with .any()
+        # instead of a pure-Python double loop -- ~25s/image -> sub-second,
+        # same box-occupancy result since padding only touches out-of-bounds cells.
+        pad_r = (-rows) % box_size
+        pad_c = (-cols) % box_size
+        padded = np.pad(skeleton, ((0, pad_r), (0, pad_c)), mode="constant", constant_values=False)
+        new_rows, new_cols = padded.shape
+        reshaped = padded.reshape(new_rows // box_size, box_size, new_cols // box_size, box_size)
+        count = int(reshaped.any(axis=(1, 3)).sum())
         if count > 0:
             box_sizes.append(math.log(1.0 / box_size))
             box_counts.append(math.log(count))
