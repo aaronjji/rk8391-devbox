@@ -5,20 +5,31 @@ GaveAVDataset's label tensor): index0=artery, index1=vessel(all), index2=vein.
 """
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 class BCE3Loss(nn.Module):
-    def __init__(self, pos_weight: float | None = None):
+    def __init__(self, pos_weight: float | None = None, vein_pos_weight: float | None = None):
         """pos_weight: upweights the vessel-positive class in the BCE term.
         Vessels are a small minority of pixels (~3% density), so an
         unweighted loss naturally biases toward conservative/high-precision
         predictions -- real leaderboard data (2026-07-17) showed this is
         exactly our gap vs. the #1 team: our Sensitivity trails theirs badly
         (~0.6-0.75 vs ~0.96-0.97) while our DSC is actually higher, meaning
-        we're too conservative rather than too imprecise."""
+        we're too conservative rather than too imprecise.
+
+        vein_pos_weight: separate override for the vein channel only (falls
+        back to pos_weight if None). Real data (2026-07-18) showed Task2's
+        vein channel specifically trails artery on topology (COR 0.35 vs
+        0.61) even with a uniform pos_weight, so this lets vein get pushed
+        harder independently instead of dragging artery along with it."""
         super().__init__()
         pw = torch.tensor(pos_weight) if pos_weight is not None else None
-        self.loss = nn.BCEWithLogitsLoss(pos_weight=pw)
+        vein_pw = torch.tensor(vein_pos_weight) if vein_pos_weight is not None else pw
+        self.register_buffer("pos_weight", pw if pw is not None else torch.tensor(1.0))
+        self.register_buffer("vein_pos_weight", vein_pw if vein_pw is not None else torch.tensor(1.0))
+        self._pw_is_none = pos_weight is None
+        self._vein_pw_is_none = vein_pos_weight is None and pos_weight is None
 
     def forward(self, pred_vessels: torch.Tensor, vessels: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
         mask = torch.round(mask[:, 0, :, :])
@@ -26,9 +37,12 @@ class BCE3Loss(nn.Module):
         pred_a, pred_vt, pred_v = pred_vessels[:, 0], pred_vessels[:, 1], pred_vessels[:, 2]
         gt_a, gt_vt, gt_v = vessels[:, 0], vessels[:, 1], vessels[:, 2]
 
-        loss = self.loss(pred_a[mask > 0.5], gt_a[mask > 0.5])
-        loss = loss + self.loss(pred_v[mask > 0.5], gt_v[mask > 0.5])
-        loss = loss + self.loss(pred_vt[mask > 0.5], gt_vt[mask > 0.5])
+        pw = None if self._pw_is_none else self.pos_weight
+        vein_pw = None if self._vein_pw_is_none else self.vein_pos_weight
+
+        loss = F.binary_cross_entropy_with_logits(pred_a[mask > 0.5], gt_a[mask > 0.5], pos_weight=pw)
+        loss = loss + F.binary_cross_entropy_with_logits(pred_v[mask > 0.5], gt_v[mask > 0.5], pos_weight=vein_pw)
+        loss = loss + F.binary_cross_entropy_with_logits(pred_vt[mask > 0.5], gt_vt[mask > 0.5], pos_weight=pw)
         return loss
 
     def process_predicted(self, prediction: torch.Tensor) -> torch.Tensor:

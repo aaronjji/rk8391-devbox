@@ -57,14 +57,23 @@ def soft_cldice(pred: torch.Tensor, target: torch.Tensor, iterations: int = 10, 
 
 class ArteryVeinClDiceLoss(nn.Module):
     """Applies soft-clDice separately to the artery (channel 0) and vein
-    (channel 2) probability maps, averaged. Expects `pred_logits` in the
-    [artery, vessel, vein] channel order used throughout this project
-    (see src/biomarkers/labels.py)."""
+    (channel 2) probability maps, weighted-averaged. Expects `pred_logits` in
+    the [artery, vessel, vein] channel order used throughout this project
+    (see src/biomarkers/labels.py).
 
-    def __init__(self, iterations: int = 10, smooth: float = 1.0):
+    artery_weight/vein_weight let the two channels be weighted asymmetrically.
+    Real leaderboard data (2026-07-18) showed the symmetric 0.5/0.5 version
+    leaves Task2's vein topology far worse than artery (COR 0.35 vs 0.61,
+    INF 0.65 vs 0.38) despite both getting equal loss weight -- so this
+    defaults to still-symmetric 1.0/1.0 and callers pass an explicit
+    vein-favoring ratio where the data shows it's needed."""
+
+    def __init__(self, iterations: int = 10, smooth: float = 1.0, artery_weight: float = 1.0, vein_weight: float = 1.0):
         super().__init__()
         self.iterations = iterations
         self.smooth = smooth
+        self.artery_weight = artery_weight
+        self.vein_weight = vein_weight
 
     def forward(self, pred_logits: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
         pred = torch.sigmoid(pred_logits)
@@ -72,4 +81,5 @@ class ArteryVeinClDiceLoss(nn.Module):
 
         artery_loss = soft_cldice(pred[:, 0:1] * roi, target[:, 0:1] * roi, self.iterations, self.smooth)
         vein_loss = soft_cldice(pred[:, 2:3] * roi, target[:, 2:3] * roi, self.iterations, self.smooth)
-        return 0.5 * (artery_loss + vein_loss)
+        total_weight = self.artery_weight + self.vein_weight
+        return (self.artery_weight * artery_loss + self.vein_weight * vein_loss) / total_weight

@@ -43,7 +43,18 @@ def parse_args():
     p.add_argument("--amp-dtype", type=str, default="bf16", choices=["none", "fp16", "bf16"])
     p.add_argument("--warm-start-task1", type=str, default=None, help="Path to a trained Task1 checkpoint (latest.pth or final.pth) to initialize the RGB encoder + decoder from")
     p.add_argument("--pos-weight", type=float, default=5.0, help="See train_task1.py -- upweights vessel-positive pixels, 0 disables")
+    p.add_argument(
+        "--vein-pos-weight", type=float, default=8.0,
+        help="Separate (higher) pos_weight for the vein channel only. Real leaderboard data (2026-07-18) showed "
+             "Task2's vein topology trails artery badly (COR 0.35 vs 0.61, INF 0.65 vs 0.38) under a uniform "
+             "pos_weight -- this pushes vein harder independently. Set equal to --pos-weight to disable the asymmetry.",
+    )
     p.add_argument("--cldice-weight", type=float, default=0.3, help="See train_task1.py -- soft-clDice topology loss weight, 0 disables")
+    p.add_argument(
+        "--vein-topology-ratio", type=float, default=2.0,
+        help="Relative weight of vein vs artery inside the clDice term (artery fixed at 1.0). "
+             "Same motivation as --vein-pos-weight -- vein topology needs more pressure than artery here. 1.0 = symmetric.",
+    )
     p.add_argument("--out-dir", type=str, default="runs/task2")
     p.add_argument("--max-steps", type=int, default=None)
     p.add_argument("--max-seconds", type=float, default=None)
@@ -99,9 +110,13 @@ def main():
         task1_sd = ckpt["model"] if isinstance(ckpt, dict) and "model" in ckpt else ckpt
         model = transfer_task1_to_task2(model, task1_sd)
 
-    base_criterion = BCE3Loss(pos_weight=args.pos_weight if args.pos_weight > 0 else None)
+    base_criterion = BCE3Loss(
+        pos_weight=args.pos_weight if args.pos_weight > 0 else None,
+        vein_pos_weight=args.vein_pos_weight if args.pos_weight > 0 else None,
+    )
     if args.cldice_weight > 0:
-        criterion = RRClDiceLoss(base_criterion, ArteryVeinClDiceLoss(), cldice_weight=args.cldice_weight)
+        cldice_loss = ArteryVeinClDiceLoss(artery_weight=1.0, vein_weight=args.vein_topology_ratio)
+        criterion = RRClDiceLoss(base_criterion, cldice_loss, cldice_weight=args.cldice_weight)
     else:
         criterion = RRLoss(base_criterion)
     criterion = criterion.to(device)  # pos_weight is a buffer, must move with the module
