@@ -3,8 +3,17 @@ across several fold checkpoints (of the same task) before saving, rather than
 ensembling at the mask/biomarker level. Reuses predict_task1.py's sliding-window
 tiling so ensembled predictions are still full-resolution.
 
-Usage (Task 2, 5-fold ensemble):
-    python src/predict_ensemble.py --task task2 \
+Optionally adds horizontal-flip TTA (--tta): each model also predicts on the
+mirrored image, the result is flipped back, and averaged in alongside the
+un-flipped prediction. Kept to a single flip (not a larger rotation/flip suite)
+deliberately -- with a 5-way fold ensemble already multiplying inference time
+5x, each extra TTA view multiplies it further, and horizontal flip is the
+cheapest, safest one (artery=R/vessel=G/vein=B channel semantics are
+unaffected by a left-right mirror, only vertical/diagonal flips would need
+extra care).
+
+Usage (Task 2, 5-fold ensemble + TTA):
+    python src/predict_ensemble.py --task task2 --tta \
         --checkpoints runs/task2/fold0/best.pth runs/task2/fold1/best.pth \
                       runs/task2/fold2/best.pth runs/task2/fold3/best.pth runs/task2/fold4/best.pth \
         --images-dir data/raw/GAVE2_preliminary/validation/images \
@@ -39,6 +48,7 @@ def main():
     p.add_argument("--stride", type=int, default=288)
     p.add_argument("--amp-dtype", type=str, default="bf16", choices=["none", "fp16", "bf16"])
     p.add_argument("--quantize-levels", type=int, default=32)
+    p.add_argument("--tta", action="store_true", help="Also average in a horizontal-flip prediction per model (doubles inference time)")
     args = p.parse_args()
 
     if args.task == "task2" and not args.ffa_dir:
@@ -74,10 +84,23 @@ def main():
             ffa = np.stack([ffa_a, ffa_av], axis=2)
 
         probs_sum = None
+        n_views = 0
         for model in models:
             probs = sliding_window_predict(model, image, device, ffa=ffa, tile=args.tile, stride=args.stride, amp_dtype=args.amp_dtype)
             probs_sum = probs if probs_sum is None else probs_sum + probs
-        probs = probs_sum / len(models)
+            n_views += 1
+
+            if args.tta:
+                # torch.from_numpy (used inside sliding_window_predict) rejects
+                # negative-stride arrays -- np.fliplr returns a view, not a copy.
+                image_flipped = np.ascontiguousarray(np.fliplr(image))
+                ffa_flipped = np.ascontiguousarray(np.fliplr(ffa)) if ffa is not None else None
+                probs_flipped = sliding_window_predict(
+                    model, image_flipped, device, ffa=ffa_flipped, tile=args.tile, stride=args.stride, amp_dtype=args.amp_dtype
+                )
+                probs_sum = probs_sum + np.fliplr(probs_flipped)
+                n_views += 1
+        probs = probs_sum / n_views
 
         if masks_dir is not None:
             roi = np.array(Image.open(masks_dir / img_path.name).convert("L"))
