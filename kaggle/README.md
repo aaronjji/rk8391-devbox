@@ -1,6 +1,6 @@
 # Running Task 1 training on Kaggle
 
-Code lives at `github.com/aaronjji/rk8391-devbox` (public, deliberately renamed to something non-descriptive rather than left as `gave2-challenge` -- see git history). Since Kaggle
+Code lives at `github.com/aaronjji/rk8391-devbox` (public, deliberately named to be non-descriptive). Since Kaggle
 notebooks are the only interface (no SSH), this has to be run manually --
 these are the setup steps, then `train_notebook.py` has the actual cells.
 
@@ -15,8 +15,8 @@ these are the setup steps, then `train_notebook.py` has the actual cells.
 3. **Add the GitHub token as a Kaggle Secret**: Add-ons -> Secrets -> New
    Secret -> name it `GH_TOKEN`, paste the token, attach it to this notebook.
 4. **Upload the dataset privately**: kaggle.com/datasets -> New Dataset ->
-   upload your local `data/raw/GAVE2_preliminary/` folder -> set visibility
-   to **Private** (the competition prohibits public re-hosting). Then in the
+   upload your local `data/raw/` folder -> set visibility
+   to **Private** (dataset usage terms prohibit public re-hosting). Then in the
    notebook, Add Input -> select that dataset. Note the slug Kaggle assigns
    it (shown in the Add Input panel) -- you'll need it for Cell 3.
 5. Copy each `# %%` block from `train_notebook.py` into its own cell in the
