@@ -13,7 +13,9 @@
   ],
   "dataset_sources": [
     "aaronajit/gave2-preliminary",
-    "aaronajit/gave2-registered"
+    "aaronajit/gave2-registered",
+    "aaronajit/gave2-task1-fold0-ckpt",
+    "aaronajit/gave2-task2-xattn-fold0-ckpt"
   ],
   "kernel_sources": [],
   "competition_sources": [],
