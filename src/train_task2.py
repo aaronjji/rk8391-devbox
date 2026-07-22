@@ -62,6 +62,13 @@ def parse_args():
     p.add_argument("--val-every-epochs", type=int, default=5, help="See train_task1.py")
     p.add_argument("--resume", action="store_true")
     p.add_argument("--seed", type=int, default=77)
+    p.add_argument(
+        "--fusion", type=str, default="additive", choices=["additive", "xattn"],
+        help="'additive' = baseline SE-gated add fusion (model.py's NewUNetModule). "
+             "'xattn' = cross-attention fusion between RGB and FFA branches at each "
+             "encoder scale (models/cmrrwnet_xattn.py) -- no spatial interaction "
+             "between modalities exists in the additive version.",
+    )
     return p.parse_args()
 
 
@@ -103,7 +110,8 @@ def main():
     val_loader = DataLoader(val_ds, batch_size=1, shuffle=False, num_workers=0)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = build_model("task2", base_ch=args.base_ch, iterations=args.iterations, pretrained=False).to(device)
+    model_task = "task2_xattn" if args.fusion == "xattn" else "task2"
+    model = build_model(model_task, base_ch=args.base_ch, iterations=args.iterations, pretrained=False).to(device)
 
     if args.warm_start_task1:
         ckpt = torch.load(args.warm_start_task1, map_location=device)

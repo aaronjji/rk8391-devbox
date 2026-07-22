@@ -90,7 +90,10 @@ def transfer_task1_to_task2(task2_model: CMRRWNet, task1_state_dict: dict, stric
 
 
 def build_model(task: str, base_ch: int = 64, iterations: int = 5, pretrained: bool = True):
-    """task: 'task1' (3ch CFP) or 'task2' (5ch CFP+FFA)."""
+    """task: 'task1' (3ch CFP), 'task2' (5ch CFP+FFA, SE-gated additive fusion),
+    or 'task2_xattn' (5ch CFP+FFA, cross-attention fusion -- see
+    models/cmrrwnet_xattn.py).
+    """
     if task == "task1":
         model = RRWNet(input_ch=3, output_ch=3, base_ch=base_ch, iterations=iterations)
         if pretrained:
@@ -103,5 +106,8 @@ def build_model(task: str, base_ch: int = 64, iterations: int = 5, pretrained: b
         # transfer_task1_to_task2() explicitly with a trained Task1
         # checkpoint (see train_task2.py --warm-start-task1).
         return model
+    elif task == "task2_xattn":
+        from .cmrrwnet_xattn import CMRRWNetXAttn
+        return CMRRWNetXAttn(input_ch=5, output_ch=3, base_ch=base_ch, iterations=iterations)
     else:
         raise ValueError(f"Unknown task: {task}")
